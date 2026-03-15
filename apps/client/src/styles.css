@@ -13,8 +13,15 @@ body {
   margin: 0;
   min-width: 320px;
   background:
-    radial-gradient(circle at top left, rgba(255, 255, 255, 0.95), transparent 35%),
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.94), transparent 34%),
     linear-gradient(180deg, #dceef5 0%, #edf0d1 100%);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
 }
 
 #root {
@@ -27,7 +34,7 @@ body {
 
 .hero {
   display: grid;
-  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
+  grid-template-columns: minmax(0, 1.7fr) minmax(320px, 1fr);
   gap: 20px;
   align-items: start;
   margin-bottom: 20px;
@@ -88,7 +95,7 @@ h1 {
 }
 
 .metric-card strong {
-  font-size: 1.1rem;
+  font-size: 1.08rem;
 }
 
 .layout {
@@ -103,99 +110,70 @@ h1 {
 .card-header {
   display: flex;
   justify-content: space-between;
-  gap: 12px;
+  gap: 14px;
   align-items: start;
   margin-bottom: 16px;
 }
 
-.camera-pill {
+.header-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.camera-pill,
+.reset-button {
   padding: 10px 14px;
   border-radius: 999px;
+}
+
+.camera-pill {
   background: #23495f;
   color: #f7f7ef;
   white-space: nowrap;
 }
 
+.reset-button {
+  border: 0;
+  background: #d1802f;
+  color: #fffef7;
+  cursor: pointer;
+}
+
+.reset-button:hover {
+  background: #bb6b1d;
+}
+
 .world-frame {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: minmax(0, 1fr) 310px;
   gap: 18px;
 }
 
-.world {
-  position: relative;
-  width: min(100%, var(--world-width));
-  height: var(--world-height);
-  overflow: hidden;
+.world-frame.interactive {
+  align-items: start;
+}
+
+.canvas-shell {
+  min-height: 540px;
   border-radius: 24px;
+  overflow: hidden;
   border: 2px solid rgba(36, 72, 94, 0.24);
-  background:
-    radial-gradient(circle at 50% 70%, rgba(255, 236, 188, 0.55), transparent 25%),
-    linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 100%);
+  background: rgba(219, 235, 244, 0.85);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.45);
 }
 
-.platform {
-  position: absolute;
-  border-radius: 999px;
-  background:
-    linear-gradient(180deg, #8f775d 0%, #6e5946 100%);
-  box-shadow:
-    inset 0 -4px 0 rgba(42, 26, 17, 0.25),
-    0 5px 18px rgba(51, 43, 35, 0.18);
+.battle-canvas {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: grab;
+  touch-action: none;
 }
 
-.integrity-2,
-.integrity-3 {
-  filter: saturate(0.85);
-}
-
-.integrity-4 {
-  outline: 3px dashed #c8741b;
-  outline-offset: 3px;
-}
-
-.integrity-5 {
-  opacity: 0.15;
-}
-
-.tank-marker {
-  position: absolute;
-  width: 34px;
-  height: 22px;
-  border-radius: 10px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  font-size: 0.85rem;
-  font-weight: 700;
-  transform: translate(-50%, -50%);
-}
-
-.tank-marker.left {
-  background: #2e7d57;
-}
-
-.tank-marker.right {
-  background: #a24747;
-}
-
-.viewport-window {
-  position: absolute;
-  inset: 18% 28% 26% 30%;
-  border: 3px solid rgba(35, 73, 95, 0.55);
-  border-radius: 18px;
-}
-
-.trajectory-hint {
-  position: absolute;
-  left: 46%;
-  top: 32%;
-  width: 140px;
-  height: 140px;
-  border-top: 3px dashed rgba(95, 108, 120, 0.7);
-  border-right: 3px dashed rgba(95, 108, 120, 0.7);
-  border-radius: 0 120px 0 0;
-  transform: rotate(20deg);
+.battle-canvas:active {
+  cursor: grabbing;
 }
 
 .hud-panel {
@@ -214,7 +192,7 @@ h1 {
 
 .minimap {
   position: relative;
-  height: 128px;
+  height: 146px;
   border-radius: 18px;
   background: linear-gradient(180deg, #d4ecdc 0%, #c9e4d8 100%);
   overflow: hidden;
@@ -238,14 +216,24 @@ h1 {
 }
 
 .minimap-platform {
-  height: 7px;
+  height: 8px;
   border-radius: 999px;
   background: rgba(111, 91, 76, 0.85);
 }
 
+.minimap-platform.integrity-2,
+.minimap-platform.integrity-3 {
+  background: rgba(117, 94, 72, 0.82);
+}
+
+.minimap-platform.integrity-4,
+.minimap-platform.integrity-5 {
+  background: rgba(198, 117, 28, 0.88);
+}
+
 .minimap-marker {
-  width: 8px;
-  height: 8px;
+  width: 9px;
+  height: 9px;
   border-radius: 999px;
   transform: translate(-50%, -50%);
 }
@@ -259,11 +247,8 @@ h1 {
 }
 
 .minimap-camera {
-  left: 31%;
-  top: 24%;
-  width: 36%;
-  height: 40%;
   border: 2px solid #23495f;
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .info-row {
@@ -282,30 +267,6 @@ h1 {
   color: #52616b;
 }
 
-.charge-track {
-  position: relative;
-  margin-top: 14px;
-  height: 18px;
-  border-radius: 999px;
-  background: #ddd8cb;
-  overflow: hidden;
-}
-
-.charge-fill {
-  width: 64%;
-  height: 100%;
-  background: linear-gradient(90deg, #e7bb57 0%, #dc7f15 100%);
-}
-
-.charge-cursor {
-  position: absolute;
-  top: -2px;
-  left: 68%;
-  width: 4px;
-  height: 22px;
-  background: #b23c3c;
-}
-
 .grid-two {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -318,34 +279,10 @@ h1 {
   line-height: 1.7;
 }
 
-.roadmap {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 14px;
-}
-
-.roadmap-step {
-  padding: 16px;
-  border-radius: 18px;
-  background: rgba(216, 235, 242, 0.72);
-}
-
-.roadmap-step h3 {
-  margin-bottom: 10px;
-  font-size: 1rem;
-}
-
-.roadmap-step p {
-  margin-bottom: 0;
-  color: #41535f;
-  line-height: 1.6;
-}
-
 @media (max-width: 1180px) {
   .hero,
   .world-frame,
-  .grid-two,
-  .roadmap {
+  .grid-two {
     grid-template-columns: 1fr;
   }
 
@@ -353,8 +290,8 @@ h1 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .world {
-    width: 100%;
+  .canvas-shell {
+    min-height: 420px;
   }
 }
 
@@ -371,7 +308,13 @@ h1 {
     flex-direction: column;
   }
 
-  .camera-pill {
-    white-space: normal;
+  .header-actions {
+    width: 100%;
+  }
+
+  .camera-pill,
+  .reset-button {
+    width: 100%;
+    text-align: center;
   }
 }

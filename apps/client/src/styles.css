@@ -1,0 +1,377 @@
+:root {
+  color-scheme: light;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  background: #dceef5;
+  color: #1b2b34;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background:
+    radial-gradient(circle at top left, rgba(255, 255, 255, 0.95), transparent 35%),
+    linear-gradient(180deg, #dceef5 0%, #edf0d1 100%);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+.app-shell {
+  padding: 28px;
+}
+
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 20px;
+}
+
+.eyebrow {
+  margin: 0 0 10px;
+  color: #7b4e18;
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin-top: 0;
+}
+
+h1 {
+  margin-bottom: 12px;
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  line-height: 1;
+}
+
+.hero-copy {
+  max-width: 760px;
+  font-size: 1.05rem;
+  line-height: 1.6;
+}
+
+.hero-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card,
+.card,
+.panel {
+  background: rgba(255, 248, 235, 0.82);
+  border: 1px solid rgba(32, 54, 74, 0.12);
+  border-radius: 22px;
+  box-shadow: 0 18px 50px rgba(34, 62, 84, 0.08);
+}
+
+.metric-card {
+  padding: 18px;
+}
+
+.metric-card span {
+  display: block;
+  margin-bottom: 8px;
+  color: #5b6770;
+  font-size: 0.86rem;
+}
+
+.metric-card strong {
+  font-size: 1.1rem;
+}
+
+.layout {
+  display: grid;
+  gap: 20px;
+}
+
+.card {
+  padding: 20px;
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: start;
+  margin-bottom: 16px;
+}
+
+.camera-pill {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: #23495f;
+  color: #f7f7ef;
+  white-space: nowrap;
+}
+
+.world-frame {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 18px;
+}
+
+.world {
+  position: relative;
+  width: min(100%, var(--world-width));
+  height: var(--world-height);
+  overflow: hidden;
+  border-radius: 24px;
+  border: 2px solid rgba(36, 72, 94, 0.24);
+  background:
+    radial-gradient(circle at 50% 70%, rgba(255, 236, 188, 0.55), transparent 25%),
+    linear-gradient(180deg, var(--sky-top) 0%, var(--sky-bottom) 100%);
+}
+
+.platform {
+  position: absolute;
+  border-radius: 999px;
+  background:
+    linear-gradient(180deg, #8f775d 0%, #6e5946 100%);
+  box-shadow:
+    inset 0 -4px 0 rgba(42, 26, 17, 0.25),
+    0 5px 18px rgba(51, 43, 35, 0.18);
+}
+
+.integrity-2,
+.integrity-3 {
+  filter: saturate(0.85);
+}
+
+.integrity-4 {
+  outline: 3px dashed #c8741b;
+  outline-offset: 3px;
+}
+
+.integrity-5 {
+  opacity: 0.15;
+}
+
+.tank-marker {
+  position: absolute;
+  width: 34px;
+  height: 22px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  transform: translate(-50%, -50%);
+}
+
+.tank-marker.left {
+  background: #2e7d57;
+}
+
+.tank-marker.right {
+  background: #a24747;
+}
+
+.viewport-window {
+  position: absolute;
+  inset: 18% 28% 26% 30%;
+  border: 3px solid rgba(35, 73, 95, 0.55);
+  border-radius: 18px;
+}
+
+.trajectory-hint {
+  position: absolute;
+  left: 46%;
+  top: 32%;
+  width: 140px;
+  height: 140px;
+  border-top: 3px dashed rgba(95, 108, 120, 0.7);
+  border-right: 3px dashed rgba(95, 108, 120, 0.7);
+  border-radius: 0 120px 0 0;
+  transform: rotate(20deg);
+}
+
+.hud-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.panel {
+  padding: 16px;
+}
+
+.panel h3 {
+  margin-bottom: 14px;
+  font-size: 1rem;
+}
+
+.minimap {
+  position: relative;
+  height: 128px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #d4ecdc 0%, #c9e4d8 100%);
+  overflow: hidden;
+  border: 1px solid rgba(49, 77, 68, 0.16);
+}
+
+.minimap-floor,
+.minimap-platform,
+.minimap-marker,
+.minimap-camera {
+  position: absolute;
+}
+
+.minimap-floor {
+  left: 4%;
+  right: 4%;
+  bottom: 6%;
+  height: 10%;
+  border-radius: 999px;
+  background: #6f5b4c;
+}
+
+.minimap-platform {
+  height: 7px;
+  border-radius: 999px;
+  background: rgba(111, 91, 76, 0.85);
+}
+
+.minimap-marker {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  transform: translate(-50%, -50%);
+}
+
+.minimap-marker.left {
+  background: #2e8b57;
+}
+
+.minimap-marker.right {
+  background: #c15454;
+}
+
+.minimap-camera {
+  left: 31%;
+  top: 24%;
+  width: 36%;
+  height: 40%;
+  border: 2px solid #23495f;
+}
+
+.info-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(33, 54, 70, 0.08);
+}
+
+.info-row:last-child {
+  border-bottom: 0;
+}
+
+.info-row span {
+  color: #52616b;
+}
+
+.charge-track {
+  position: relative;
+  margin-top: 14px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ddd8cb;
+  overflow: hidden;
+}
+
+.charge-fill {
+  width: 64%;
+  height: 100%;
+  background: linear-gradient(90deg, #e7bb57 0%, #dc7f15 100%);
+}
+
+.charge-cursor {
+  position: absolute;
+  top: -2px;
+  left: 68%;
+  width: 4px;
+  height: 22px;
+  background: #b23c3c;
+}
+
+.grid-two {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+.plain-list {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.7;
+}
+
+.roadmap {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.roadmap-step {
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(216, 235, 242, 0.72);
+}
+
+.roadmap-step h3 {
+  margin-bottom: 10px;
+  font-size: 1rem;
+}
+
+.roadmap-step p {
+  margin-bottom: 0;
+  color: #41535f;
+  line-height: 1.6;
+}
+
+@media (max-width: 1180px) {
+  .hero,
+  .world-frame,
+  .grid-two,
+  .roadmap {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .world {
+    width: 100%;
+  }
+}
+
+@media (max-width: 700px) {
+  .app-shell {
+    padding: 16px;
+  }
+
+  .hero-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .card-header {
+    flex-direction: column;
+  }
+
+  .camera-pill {
+    white-space: normal;
+  }
+}

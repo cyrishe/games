@@ -1,0 +1,16 @@
+{
+  "name": "tank-battle-web",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "dev:client": "npm run dev --workspace @tank-battle/client",
+    "dev:server": "npm run dev --workspace @tank-battle/server",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

@@ -190,6 +190,29 @@ h1 {
   font-size: 1rem;
 }
 
+.charge-track {
+  position: relative;
+  margin-top: 14px;
+  height: 18px;
+  border-radius: 999px;
+  background: #ddd8cb;
+  overflow: hidden;
+}
+
+.charge-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #e7bb57 0%, #dc7f15 100%);
+}
+
+.charge-cursor {
+  position: absolute;
+  top: -2px;
+  width: 4px;
+  height: 22px;
+  background: #b23c3c;
+  transform: translateX(-50%);
+}
+
 .minimap {
   position: relative;
   height: 146px;

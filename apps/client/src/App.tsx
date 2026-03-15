@@ -29,14 +29,25 @@ type TankState = {
   lastJumpAt: number;
 };
 
+type AimState = {
+  angle: number;
+  charging: boolean;
+  chargeDirection: 1 | -1;
+  chargeValue: number;
+};
+
 const previewMap = mapDefinitions[0];
 const previewTank = tankDefinitions[0];
 const previewWeapons = weaponDefinitions;
-const moveAcceleration = 0.85;
-const airControl = 0.3;
-const friction = 0.82;
-const gravity = 0.62;
-const terminalVelocity = 20;
+const activeWeapon = previewWeapons[0];
+const moveAcceleration = 0.36;
+const airControl = 0.22;
+const friction = 0.72;
+const gravity = 0.48;
+const terminalVelocity = 14;
+const movementScale = 3;
+const aimAdjustStep = 0.9;
+const chargeSpeed = 0.022;
 const tankWidth = 54;
 const tankHeight = 28;
 
@@ -55,6 +66,15 @@ function createInitialTankState(): TankState {
     grounded: false,
     facing: 1,
     lastJumpAt: -prototypeGameConfig.turn.jumpCooldownMs
+  };
+}
+
+function createInitialAimState(): AimState {
+  return {
+    angle: 42,
+    charging: false,
+    chargeDirection: 1,
+    chargeValue: 0.18
   };
 }
 
@@ -99,12 +119,14 @@ export function App() {
     cameraY: 0
   });
   const lastTimeRef = useRef<number | null>(null);
+  const aimRef = useRef<AimState>(createInitialAimState());
 
   const [viewportSize, setViewportSize] = useState({ width: 960, height: 540 });
   const [camera, setCamera] = useState<CameraState>(() => createInitialCameraState(960, 540));
   const [player, setPlayer] = useState<TankState>(() => createInitialTankState());
+  const [aim, setAim] = useState<AimState>(() => createInitialAimState());
   const [followPlayer, setFollowPlayer] = useState(true);
-  const [statusText, setStatusText] = useState("按方向键移动，Shift 跳跃，拖动战场可查看远处平台。");
+  const [statusText, setStatusText] = useState("按方向键移动，Shift 跳跃，Space 蓄力，拖动战场可查看远处平台。");
 
   useLayoutEffect(() => {
     const element = battlefieldRef.current;
@@ -161,8 +183,11 @@ export function App() {
       lastTimeRef.current = timestamp;
 
       const nextPlayer = stepTank(tankRef.current, pressedKeysRef.current, timestamp, deltaSeconds);
+      const nextAim = stepAim(aimRef.current, pressedKeysRef.current, deltaSeconds, nextPlayer.facing);
       tankRef.current = nextPlayer;
+      aimRef.current = nextAim;
       setPlayer(nextPlayer);
+      setAim(nextAim);
 
       const nextCamera = draggingRef.current.active
         ? cameraRef.current
@@ -173,7 +198,7 @@ export function App() {
         setCamera(nextCamera);
       }
 
-      drawBattlefield(canvasRef.current, viewportSize.width, viewportSize.height, nextCamera, nextPlayer);
+      drawBattlefield(canvasRef.current, viewportSize.width, viewportSize.height, nextCamera, nextPlayer, nextAim);
       animationFrameRef.current = window.requestAnimationFrame(loop);
     };
 
@@ -274,14 +299,14 @@ export function App() {
           <h1>可操作的单机战场原型</h1>
           <p className="hero-copy">
             这一版已经进入真正的原型阶段：左侧主战场由 Canvas 绘制，支持镜头跟随、拖动、
-            缩放，以及坦克的左右移动和跳跃。后续会在这套基础上继续叠加蓄力、弹道、地形破坏和回合制。
+            缩放，以及坦克的左右移动、跳跃、蓄力和瞄准。后续会在这套基础上继续叠加真实发射、地形破坏和回合制。
           </p>
         </div>
         <div className="hero-metrics">
           <MetricCard label="默认地图" value={previewMap.name} />
           <MetricCard label="地图尺寸" value={`${previewMap.worldWidth} x ${previewMap.worldHeight}`} />
           <MetricCard label="镜头模式" value={followPlayer ? "跟随坦克" : "自由观察"} />
-          <MetricCard label="玩家位置" value={`${Math.round(playerCenterX)}, ${Math.round(player.y)}`} />
+          <MetricCard label="瞄准" value={`${aim.angle.toFixed(0)}° / ${Math.round(aim.chargeValue * 100)}%`} />
         </div>
       </header>
 
@@ -373,14 +398,19 @@ export function App() {
                 <InfoRow label="接地状态" value={player.grounded ? "已着陆" : "空中"} />
                 <InfoRow label="水平速度" value={`${player.velocityX.toFixed(1)} u/f`} />
                 <InfoRow label="垂直速度" value={`${player.velocityY.toFixed(1)} u/f`} />
+                <InfoRow label="仰角" value={`${aim.angle.toFixed(1)}°`} />
                 <InfoRow label="缩放" value={`${camera.zoom.toFixed(2)}x`} />
               </Panel>
 
-              <Panel title="下一步待接入">
+              <Panel title="瞄准与武器">
                 <InfoRow label="武器" value={previewWeapons[0].name} />
-                <InfoRow label="回合" value={`${prototypeGameConfig.turn.turnDurationMs / 1000}s`} />
+                <InfoRow label="蓄力" value={`${Math.round(aim.chargeValue * 100)}%`} />
                 <InfoRow label="风力" value={`默认 ${prototypeGameConfig.wind.defaultForce}`} />
-                <InfoRow label="地形破坏" value={`网格 ${prototypeGameConfig.destruction.logicalCellSize}px`} />
+                <InfoRow label="回合" value={`${prototypeGameConfig.turn.turnDurationMs / 1000}s`} />
+                <div className="charge-track">
+                  <div className="charge-fill" style={{ width: `${Math.max(8, aim.chargeValue * 100)}%` }} />
+                  <div className="charge-cursor" style={{ left: `${aim.chargeValue * 100}%` }} />
+                </div>
               </Panel>
             </aside>
           </div>
@@ -389,8 +419,10 @@ export function App() {
         <section className="card grid-two">
           <Panel title="当前可操作内容">
             <ul className="plain-list">
-              <li>方向键：左右移动坦克。</li>
-              <li>Shift：起跳，支持从低层跳到较高平台。</li>
+              <li>方向键：左右移动坦克，速度已调慢。</li>
+              <li>Shift：起跳，跳跃高度已降低。</li>
+              <li>Space：来回蓄力，不发射，仅预览力度。</li>
+              <li>Up / Down：调整炮塔仰角。</li>
               <li>鼠标拖动：解除跟随并平移镜头。</li>
               <li>滚轮：缩放主视图，小地图视窗同步更新。</li>
             </ul>
@@ -398,7 +430,7 @@ export function App() {
 
           <Panel title="接下来要补的系统">
             <ul className="plain-list">
-              <li>蓄力条、仰角和弹道轨迹。</li>
+              <li>真实发射、炮弹飞行和命中。</li>
               <li>平台受击后的像素破坏与网格强度。</li>
               <li>回合制输入锁和倒计时。</li>
               <li>服务端权威同步与房间系统。</li>
@@ -462,8 +494,8 @@ function stepTank(current: TankState, pressedKeys: Set<string>, timestamp: numbe
 
   next.velocityY = clamp(next.velocityY + gravity * deltaSeconds, -30, terminalVelocity);
 
-  let nextX = clamp(next.x + next.velocityX * deltaSeconds * 4.2, 0, previewMap.worldWidth - tankWidth);
-  let nextY = next.y + next.velocityY * deltaSeconds * 4.2;
+  let nextX = clamp(next.x + next.velocityX * deltaSeconds * movementScale, 0, previewMap.worldWidth - tankWidth);
+  let nextY = next.y + next.velocityY * deltaSeconds * movementScale;
 
   const previousBottom = next.y + tankHeight;
   const nextBottom = nextY + tankHeight;
@@ -494,6 +526,36 @@ function stepTank(current: TankState, pressedKeys: Set<string>, timestamp: numbe
   next.x = nextX;
   next.y = nextY;
   next.grounded = grounded;
+
+  return next;
+}
+
+function stepAim(current: AimState, pressedKeys: Set<string>, deltaSeconds: number, facing: 1 | -1): AimState {
+  const next = { ...current };
+  const aimDirection = (pressedKeys.has("ArrowUp") ? 1 : 0) - (pressedKeys.has("ArrowDown") ? 1 : 0);
+  const minAngle = facing === 1 ? previewTank.turretAngleMin : 180 - previewTank.turretAngleMax;
+  const maxAngle = facing === 1 ? previewTank.turretAngleMax : 180 - previewTank.turretAngleMin;
+
+  if (aimDirection !== 0) {
+    next.angle = clamp(next.angle + aimDirection * aimAdjustStep * deltaSeconds * 2.2, minAngle, maxAngle);
+  } else {
+    next.angle = clamp(next.angle, minAngle, maxAngle);
+  }
+
+  if (pressedKeys.has("Space")) {
+    next.charging = true;
+    next.chargeValue += next.chargeDirection * chargeSpeed * deltaSeconds * 2.2;
+
+    if (next.chargeValue >= 1) {
+      next.chargeValue = 1;
+      next.chargeDirection = -1;
+    } else if (next.chargeValue <= 0.08) {
+      next.chargeValue = 0.08;
+      next.chargeDirection = 1;
+    }
+  } else if (next.charging) {
+    next.charging = false;
+  }
 
   return next;
 }
@@ -539,7 +601,8 @@ function drawBattlefield(
   viewportWidth: number,
   viewportHeight: number,
   camera: CameraState,
-  player: TankState
+  player: TankState,
+  aim: AimState
 ) {
   const context = canvas?.getContext("2d");
 
@@ -562,11 +625,46 @@ function drawBattlefield(
   drawGrid(context);
   drawPlatforms(context);
   drawSpawnHints(context);
+  drawTrajectoryPreview(context, player, aim);
   drawTank(context, player.x, player.y, "#2d7a56", player.facing);
 
   const enemySpawn = previewMap.spawnPoints.find((entry) => entry.team === "right") ?? previewMap.spawnPoints[0];
   drawTank(context, enemySpawn.position.x, enemySpawn.position.y - tankHeight, "#9f4b49", -1);
 
+  context.restore();
+}
+
+function drawTrajectoryPreview(context: CanvasRenderingContext2D, player: TankState, aim: AimState) {
+  const originX = player.x + tankWidth / 2;
+  const originY = player.y + 8;
+  const angleRadians = (aim.angle * Math.PI) / 180;
+  const speed = activeWeapon.maxRange / 65 * aim.chargeValue;
+  const vx = Math.cos(angleRadians) * speed;
+  const vy = -Math.sin(angleRadians) * speed;
+
+  context.save();
+  context.strokeStyle = aim.charging ? "rgba(194, 82, 32, 0.95)" : "rgba(44, 77, 97, 0.7)";
+  context.lineWidth = 3;
+  context.setLineDash([10, 9]);
+  context.beginPath();
+
+  for (let step = 0; step <= 45; step += 1) {
+    const time = step * 0.26;
+    const x = originX + vx * time;
+    const y = originY + vy * time + 0.5 * gravity * movementScale * 1.6 * time * time * 12;
+
+    if (step === 0) {
+      context.moveTo(x, y);
+    } else {
+      context.lineTo(x, y);
+    }
+
+    if (x < 0 || x > previewMap.worldWidth || y > previewMap.worldHeight) {
+      break;
+    }
+  }
+
+  context.stroke();
   context.restore();
 }
 

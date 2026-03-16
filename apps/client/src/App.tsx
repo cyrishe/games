@@ -2,7 +2,8 @@ import {
   mapDefinitions,
   prototypeGameConfig,
   tankDefinitions,
-  weaponDefinitions
+  weaponDefinitions,
+  type PlatformDefinition
 } from "@tank-battle/shared";
 import {
   useEffect,
@@ -67,18 +68,29 @@ type EnemyState = {
   facing: 1 | -1;
 };
 
+type PlatformDamageMark = {
+  x: number;
+  y: number;
+  radius: number;
+};
+
+type PlatformState = PlatformDefinition & {
+  destroyed: boolean;
+  damageMarks: PlatformDamageMark[];
+};
+
 const previewMap = mapDefinitions[0];
 const previewTank = tankDefinitions[0];
 const previewWeapons = weaponDefinitions;
 const activeWeapon = previewWeapons[0];
-const moveAcceleration = 0.36;
-const airControl = 0.22;
-const friction = 0.72;
+const moveAcceleration = 0.17;
+const airControl = 0.14;
+const friction = 0.88;
 const gravity = 0.48;
 const terminalVelocity = 14;
-const movementScale = 3;
-const aimAdjustStep = 0.9;
-const chargeSpeed = 0.022;
+const movementScale = 2.35;
+const aimAdjustStep = 0.72;
+const chargeSpeed = 0.009;
 const tankWidth = 54;
 const tankHeight = 28;
 const projectileRadius = 7;
@@ -87,6 +99,7 @@ const windAcceleration = prototypeGameConfig.wind.defaultForce * 0.045;
 const enemyInitialHealth = 100;
 const hitFeedbackDurationsMs = 1600;
 const explosionDurationMs = 420;
+const maxDamageMarksPerPlatform = 6;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -136,6 +149,14 @@ function createInitialEnemyState(): EnemyState {
   };
 }
 
+function createInitialPlatformsState(): PlatformState[] {
+  return previewMap.platforms.map((platform) => ({
+    ...platform,
+    destroyed: false,
+    damageMarks: []
+  }));
+}
+
 function createInitialCameraState(viewportWidth: number, viewportHeight: number): CameraState {
   const spawn = previewMap.spawnPoints.find((entry) => entry.team === "left") ?? previewMap.spawnPoints[0];
   const zoom = 0.58;
@@ -182,6 +203,7 @@ export function App() {
   const explosionRef = useRef<ExplosionState | null>(null);
   const enemyRef = useRef<EnemyState>(createInitialEnemyState());
   const hitFeedbackRef = useRef<HitFeedback | null>(null);
+  const platformsRef = useRef<PlatformState[]>(createInitialPlatformsState());
   const previousSpaceDownRef = useRef(false);
 
   const [viewportSize, setViewportSize] = useState({ width: 960, height: 540 });
@@ -192,6 +214,7 @@ export function App() {
   const [explosion, setExplosion] = useState<ExplosionState | null>(null);
   const [enemy, setEnemy] = useState<EnemyState>(() => createInitialEnemyState());
   const [hitFeedback, setHitFeedback] = useState<HitFeedback | null>(null);
+  const [platforms, setPlatforms] = useState<PlatformState[]>(() => createInitialPlatformsState());
   const [followPlayer, setFollowPlayer] = useState(true);
   const [statusText, setStatusText] = useState("按方向键移动，Shift 跳跃，Space 蓄力，拖动战场可查看远处平台。");
 
@@ -222,16 +245,22 @@ export function App() {
   }, [viewportSize.height, viewportSize.width]);
 
   useEffect(() => {
+    const blockedCodes = new Set(["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "ShiftLeft", "ShiftRight", "Space"]);
+
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (["ArrowLeft", "ArrowRight", "Shift", "ArrowUp", "ArrowDown", "Space"].includes(event.key)) {
+      if (blockedCodes.has(event.code)) {
         event.preventDefault();
       }
 
-      pressedKeysRef.current.add(event.key);
+      pressedKeysRef.current.add(event.code);
     };
 
     const handleKeyUp = (event: KeyboardEvent) => {
-      pressedKeysRef.current.delete(event.key);
+      if (blockedCodes.has(event.code)) {
+        event.preventDefault();
+      }
+
+      pressedKeysRef.current.delete(event.code);
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -249,7 +278,7 @@ export function App() {
       const deltaSeconds = Math.min((timestamp - previous) / 16.67, 1.6);
       lastTimeRef.current = timestamp;
 
-      const nextPlayer = stepTank(tankRef.current, pressedKeysRef.current, timestamp, deltaSeconds);
+      const nextPlayer = stepTank(tankRef.current, pressedKeysRef.current, timestamp, deltaSeconds, platformsRef.current);
       const nextAim = stepAim(aimRef.current, pressedKeysRef.current, deltaSeconds, nextPlayer.facing);
       const spaceDown = pressedKeysRef.current.has("Space");
       tankRef.current = nextPlayer;
@@ -271,7 +300,7 @@ export function App() {
 
       previousSpaceDownRef.current = spaceDown;
 
-      const projectileStep = stepProjectile(projectileRef.current, deltaSeconds, enemyRef.current);
+      const projectileStep = stepProjectile(projectileRef.current, deltaSeconds, enemyRef.current, platformsRef.current);
 
       if (projectileStep.projectile !== projectileRef.current) {
         projectileRef.current = projectileStep.projectile;
@@ -307,6 +336,17 @@ export function App() {
         setStatusText("炮弹落在空地或平台上，没有击中目标。");
       }
 
+      if (projectileStep.platforms) {
+        platformsRef.current = projectileStep.platforms;
+        setPlatforms(projectileStep.platforms);
+
+        if (projectileStep.platformDamageSummary.destroyed.length > 0) {
+          setStatusText(`命中地形，${projectileStep.platformDamageSummary.destroyed.length} 处平台已坍塌。`);
+        } else if (projectileStep.platformDamageSummary.damaged.length > 0 && !projectileStep.hitResult) {
+          setStatusText(`命中地形，${projectileStep.platformDamageSummary.damaged.length} 处平台受损。`);
+        }
+      }
+
       const nextCamera = draggingRef.current.active
         ? cameraRef.current
         : updateCamera(cameraRef.current, nextPlayer, viewportSize.width, viewportSize.height, followPlayer);
@@ -325,7 +365,8 @@ export function App() {
         nextAim,
         projectileRef.current,
         explosionRef.current,
-        enemyRef.current
+        enemyRef.current,
+        platformsRef.current
       );
       animationFrameRef.current = window.requestAnimationFrame(loop);
     };
@@ -482,12 +523,12 @@ export function App() {
               <Panel title="小地图">
                 <div className="minimap">
                   <div className="minimap-floor" />
-                  {previewMap.platforms
+                  {platforms
                     .filter((platform) => platform.id !== "bottom-floor")
                     .map((platform) => (
                       <div
                         key={platform.id}
-                        className={`minimap-platform integrity-${platform.integrityLevel}`}
+                        className={`minimap-platform integrity-${platform.integrityLevel} ${platform.destroyed ? "destroyed" : ""}`}
                         style={{
                           left: `${(platform.x / previewMap.worldWidth) * 100}%`,
                           top: `${(platform.y / previewMap.worldHeight) * 100}%`,
@@ -536,6 +577,7 @@ export function App() {
                 <InfoRow label="蓄力" value={`${Math.round(aim.chargeValue * 100)}%`} />
                 <InfoRow label="风力" value={`默认 ${prototypeGameConfig.wind.defaultForce}`} />
                 <InfoRow label="命中判定" value={hitFeedback ? hitFeedback.label : "等待命中"} />
+                <InfoRow label="地形状态" value={`${platforms.filter((platform) => !platform.destroyed).length} 段可用`} />
                 <InfoRow label="回合" value={`${prototypeGameConfig.turn.turnDurationMs / 1000}s`} />
                 <div className="charge-track">
                   <div className="charge-fill" style={{ width: `${Math.max(8, aim.chargeValue * 100)}%` }} />
@@ -560,6 +602,7 @@ export function App() {
               <li>Space：按住蓄力，松手后发射。</li>
               <li>Up / Down：调整炮塔仰角，并影响弹道。</li>
               <li>命中精度会显示 Perfect / Critical / Normal。</li>
+              <li>炮弹命中平台会留下坑洞，并提升平台损坏等级。</li>
               <li>鼠标拖动：解除跟随并平移镜头。</li>
               <li>滚轮：缩放主视图，小地图视窗同步更新。</li>
             </ul>
@@ -567,7 +610,7 @@ export function App() {
 
           <Panel title="接下来要补的系统">
             <ul className="plain-list">
-              <li>平台受击后的像素破坏与网格强度。</li>
+              <li>更细的像素级破坏和局部承重。</li>
               <li>风力对真实弹道的更细致影响。</li>
               <li>回合制输入锁和倒计时。</li>
               <li>服务端权威同步与房间系统。</li>
@@ -606,7 +649,13 @@ function InfoRow(props: { label: string; value: string }) {
   );
 }
 
-function stepTank(current: TankState, pressedKeys: Set<string>, timestamp: number, deltaSeconds: number): TankState {
+function stepTank(
+  current: TankState,
+  pressedKeys: Set<string>,
+  timestamp: number,
+  deltaSeconds: number,
+  platforms: PlatformState[]
+): TankState {
   const next = { ...current };
   const horizontalInput = (pressedKeys.has("ArrowRight") ? 1 : 0) - (pressedKeys.has("ArrowLeft") ? 1 : 0);
 
@@ -620,7 +669,7 @@ function stepTank(current: TankState, pressedKeys: Set<string>, timestamp: numbe
   next.velocityX = clamp(next.velocityX, -previewTank.moveSpeed, previewTank.moveSpeed);
 
   if (
-    pressedKeys.has("Shift") &&
+    (pressedKeys.has("ShiftLeft") || pressedKeys.has("ShiftRight")) &&
     next.grounded &&
     timestamp - next.lastJumpAt >= prototypeGameConfig.turn.jumpCooldownMs
   ) {
@@ -638,7 +687,11 @@ function stepTank(current: TankState, pressedKeys: Set<string>, timestamp: numbe
   const nextBottom = nextY + tankHeight;
   let grounded = false;
 
-  for (const platform of previewMap.platforms) {
+  for (const platform of platforms) {
+    if (platform.destroyed) {
+      continue;
+    }
+
     const overlapX = nextX + tankWidth > platform.x && nextX < platform.x + platform.width;
     const fallsOntoPlatform = next.velocityY >= 0 && overlapX && previousBottom <= platform.y && nextBottom >= platform.y;
 
@@ -670,8 +723,8 @@ function stepTank(current: TankState, pressedKeys: Set<string>, timestamp: numbe
 function stepAim(current: AimState, pressedKeys: Set<string>, deltaSeconds: number, facing: 1 | -1): AimState {
   const next = { ...current };
   const aimDirection = (pressedKeys.has("ArrowUp") ? 1 : 0) - (pressedKeys.has("ArrowDown") ? 1 : 0);
-  const minAngle = facing === 1 ? previewTank.turretAngleMin : 180 - previewTank.turretAngleMax;
-  const maxAngle = facing === 1 ? previewTank.turretAngleMax : 180 - previewTank.turretAngleMin;
+  const minAngle = previewTank.turretAngleMin;
+  const maxAngle = previewTank.turretAngleMax;
 
   if (aimDirection !== 0) {
     next.angle = clamp(next.angle + aimDirection * aimAdjustStep * deltaSeconds * 2.2, minAngle, maxAngle);
@@ -681,7 +734,7 @@ function stepAim(current: AimState, pressedKeys: Set<string>, deltaSeconds: numb
 
   if (pressedKeys.has("Space")) {
     next.charging = true;
-    next.chargeValue += next.chargeDirection * chargeSpeed * deltaSeconds * 2.2;
+    next.chargeValue += next.chargeDirection * chargeSpeed * deltaSeconds * 1.8;
 
     if (next.chargeValue >= 1) {
       next.chargeValue = 1;
@@ -698,7 +751,7 @@ function stepAim(current: AimState, pressedKeys: Set<string>, deltaSeconds: numb
 }
 
 function createProjectile(player: TankState, aim: AimState): ProjectileState {
-  const angleRadians = (aim.angle * Math.PI) / 180;
+  const angleRadians = getTurretAngleRadians(aim.angle, player.facing);
   const speed = (activeWeapon.maxRange / 72) * Math.max(0.12, aim.chargeValue);
 
   return {
@@ -713,15 +766,18 @@ function createProjectile(player: TankState, aim: AimState): ProjectileState {
 function stepProjectile(
   current: ProjectileState,
   deltaSeconds: number,
-  enemy: EnemyState
+  enemy: EnemyState,
+  platforms: PlatformState[]
 ): {
   projectile: ProjectileState;
   explosion?: ExplosionState | null;
   hitResult?: { enemy: EnemyState; feedback: HitFeedback };
   missed?: boolean;
+  platforms?: PlatformState[];
+  platformDamageSummary: { damaged: string[]; destroyed: string[] };
 } {
   if (!current.active) {
-    return { projectile: current };
+    return { projectile: current, platformDamageSummary: { damaged: [], destroyed: [] } };
   }
 
   const nextVelocityX = current.velocityX + windAcceleration * activeWeapon.windFactor * deltaSeconds * 5;
@@ -738,44 +794,52 @@ function stepProjectile(
   };
 
   if (isProjectileInsideTank(nextX, nextY, enemy)) {
-    return resolveImpact(nextProjectile, enemy, false);
+    return resolveImpact(nextProjectile, enemy, false, platforms);
   }
 
-  for (const platform of previewMap.platforms) {
+  for (const platform of platforms) {
+    if (platform.destroyed) {
+      continue;
+    }
+
     if (
       nextX + projectileRadius >= platform.x &&
       nextX - projectileRadius <= platform.x + platform.width &&
       nextY + projectileRadius >= platform.y &&
       nextY - projectileRadius <= platform.y + platform.height
     ) {
-      return resolveImpact(nextProjectile, enemy, true);
+      return resolveImpact(nextProjectile, enemy, true, platforms);
     }
   }
 
   if (nextY + projectileRadius >= previewMap.finalFloorY) {
-    return resolveImpact(nextProjectile, enemy, true);
+    return resolveImpact(nextProjectile, enemy, true, platforms);
   }
 
   if (nextX < 0 || nextX > previewMap.worldWidth || nextY < 0 || nextY > previewMap.worldHeight) {
     return {
       projectile: createIdleProjectile(),
       explosion: null,
-      missed: true
+      missed: true,
+      platformDamageSummary: { damaged: [], destroyed: [] }
     };
   }
 
-  return { projectile: nextProjectile };
+  return { projectile: nextProjectile, platformDamageSummary: { damaged: [], destroyed: [] } };
 }
 
 function resolveImpact(
   projectile: ProjectileState,
   enemy: EnemyState,
-  missed: boolean
+  missed: boolean,
+  platforms: PlatformState[]
 ): {
   projectile: ProjectileState;
   explosion: ExplosionState;
   hitResult?: { enemy: EnemyState; feedback: HitFeedback };
   missed?: boolean;
+  platforms: PlatformState[];
+  platformDamageSummary: { damaged: string[]; destroyed: string[] };
 } {
   const explosion: ExplosionState = {
     x: projectile.x,
@@ -784,12 +848,78 @@ function resolveImpact(
     ttl: explosionDurationMs
   };
   const hitResult = resolveHitQuality(projectile.x, projectile.y, enemy);
+  const terrainResult = applyTerrainDamage(platforms, projectile.x, projectile.y, activeWeapon.blastRadius);
 
   return {
     projectile: createIdleProjectile(),
     explosion,
     hitResult,
-    missed: hitResult ? false : missed
+    missed: hitResult ? false : missed,
+    platforms: terrainResult.platforms,
+    platformDamageSummary: terrainResult.summary
+  };
+}
+
+function applyTerrainDamage(
+  platforms: PlatformState[],
+  impactX: number,
+  impactY: number,
+  blastRadius: number
+): {
+  platforms: PlatformState[];
+  summary: { damaged: string[]; destroyed: string[] };
+} {
+  const damaged: string[] = [];
+  const destroyed: string[] = [];
+
+  const nextPlatforms = platforms.map((platform) => {
+    if (platform.destroyed) {
+      return platform;
+    }
+
+    const closestX = clamp(impactX, platform.x, platform.x + platform.width);
+    const closestY = clamp(impactY, platform.y, platform.y + platform.height);
+    const distance = Math.hypot(impactX - closestX, impactY - closestY);
+
+    if (distance > blastRadius) {
+      return platform;
+    }
+
+    const nextIntegrity = clamp(
+      platform.integrityLevel + (distance < blastRadius * 0.45 ? 2 : 1),
+      0,
+      prototypeGameConfig.destruction.criticalThreshold
+    ) as PlatformState["integrityLevel"];
+    const relativeX = clamp(impactX - platform.x, 10, platform.width - 10);
+    const relativeY = clamp(impactY - platform.y, 4, platform.height - 4);
+    const nextDamageMarks = [
+      ...platform.damageMarks,
+      {
+        x: relativeX,
+        y: relativeY,
+        radius: clamp(blastRadius * 0.5, 14, Math.max(platform.height * 1.1, 18))
+      }
+    ].slice(-maxDamageMarksPerPlatform);
+    const nextDestroyed =
+      platform.id === "bottom-floor" ? false : nextIntegrity >= prototypeGameConfig.destruction.criticalThreshold;
+
+    damaged.push(platform.id);
+
+    if (nextDestroyed) {
+      destroyed.push(platform.id);
+    }
+
+    return {
+      ...platform,
+      integrityLevel: nextIntegrity,
+      destroyed: nextDestroyed,
+      damageMarks: nextDestroyed ? [] : nextDamageMarks
+    };
+  });
+
+  return {
+    platforms: nextPlatforms,
+    summary: { damaged, destroyed }
   };
 }
 
@@ -915,7 +1045,8 @@ function drawBattlefield(
   aim: AimState,
   projectile: ProjectileState,
   explosion: ExplosionState | null,
-  enemy: EnemyState
+  enemy: EnemyState,
+  platforms: PlatformState[]
 ) {
   const context = canvas?.getContext("2d");
 
@@ -936,23 +1067,24 @@ function drawBattlefield(
   context.translate(-camera.x, -camera.y);
 
   drawGrid(context);
-  drawPlatforms(context);
+  drawPlatforms(context, platforms);
   drawSpawnHints(context);
   if (!projectile.active) {
     drawTrajectoryPreview(context, player, aim);
   }
   drawProjectile(context, projectile);
   drawExplosion(context, explosion);
-  drawTank(context, player.x, player.y, "#2d7a56", player.facing);
+  drawTank(context, player.x, player.y, "#2d7a56", player.facing, aim.angle);
   drawTank(context, enemy.x, enemy.y, enemy.health > 0 ? "#9f4b49" : "#6e7177", enemy.facing);
 
   context.restore();
+  drawTankAimHud(context, camera, player, aim);
 }
 
 function drawTrajectoryPreview(context: CanvasRenderingContext2D, player: TankState, aim: AimState) {
   const originX = player.x + tankWidth / 2;
   const originY = player.y + 8;
-  const angleRadians = (aim.angle * Math.PI) / 180;
+  const angleRadians = getTurretAngleRadians(aim.angle, player.facing);
   const speed = (activeWeapon.maxRange / 72) * Math.max(0.12, aim.chargeValue);
   const vx = Math.cos(angleRadians) * speed;
   const vy = -Math.sin(angleRadians) * speed;
@@ -1042,8 +1174,12 @@ function drawGrid(context: CanvasRenderingContext2D) {
   context.restore();
 }
 
-function drawPlatforms(context: CanvasRenderingContext2D) {
-  for (const platform of previewMap.platforms) {
+function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformState[]) {
+  for (const platform of platforms) {
+    if (platform.destroyed) {
+      continue;
+    }
+
     context.save();
 
     const colors = [
@@ -1062,6 +1198,34 @@ function drawPlatforms(context: CanvasRenderingContext2D) {
     context.beginPath();
     context.roundRect(platform.x, platform.y, platform.width, platform.height, 12);
     context.fill();
+
+    if (platform.damageMarks.length > 0) {
+      context.save();
+      context.beginPath();
+      context.roundRect(platform.x, platform.y, platform.width, platform.height, 12);
+      context.clip();
+      context.globalCompositeOperation = "destination-out";
+
+      for (const mark of platform.damageMarks) {
+        context.beginPath();
+        context.arc(platform.x + mark.x, platform.y + mark.y, mark.radius, 0, Math.PI * 2);
+        context.fill();
+      }
+
+      context.restore();
+
+      context.save();
+      context.strokeStyle = "rgba(77, 57, 37, 0.45)";
+      context.lineWidth = 2;
+
+      for (const mark of platform.damageMarks) {
+        context.beginPath();
+        context.arc(platform.x + mark.x, platform.y + mark.y, mark.radius, 0.2, Math.PI * 1.6);
+        context.stroke();
+      }
+
+      context.restore();
+    }
 
     if (platform.integrityLevel >= prototypeGameConfig.destruction.collapseThreshold) {
       context.strokeStyle = "#c9751c";
@@ -1091,7 +1255,8 @@ function drawTank(
   x: number,
   y: number,
   bodyColor: string,
-  facing: 1 | -1
+  facing: 1 | -1,
+  relativeAngle?: number
 ) {
   context.save();
   context.translate(x, y);
@@ -1115,7 +1280,12 @@ function drawTank(
   context.lineWidth = 5;
   context.beginPath();
   context.moveTo(28, 8);
-  context.lineTo(28 + facing * 24, 2);
+  if (relativeAngle !== undefined) {
+    const turretAngle = getTurretAngleRadians(relativeAngle, facing);
+    context.lineTo(28 + Math.cos(turretAngle) * 24, 8 - Math.sin(turretAngle) * 24);
+  } else {
+    context.lineTo(28 + facing * 24, 2);
+  }
   context.stroke();
 
   context.fillStyle = "#213449";
@@ -1124,5 +1294,58 @@ function drawTank(
   context.arc(39, 28, 7, 0, Math.PI * 2);
   context.fill();
 
+  context.restore();
+}
+
+function getTurretAngleRadians(relativeAngle: number, facing: 1 | -1) {
+  const clamped = clamp(relativeAngle, previewTank.turretAngleMin, previewTank.turretAngleMax);
+  const worldAngle = facing === 1 ? clamped : 180 - clamped;
+  return (worldAngle * Math.PI) / 180;
+}
+
+function drawTankAimHud(
+  context: CanvasRenderingContext2D,
+  camera: CameraState,
+  player: TankState,
+  aim: AimState
+) {
+  const anchorX = (player.x - camera.x) * camera.zoom - 12;
+  const anchorY = (player.y - camera.y) * camera.zoom - 82;
+  const panelWidth = 150;
+  const panelHeight = 54;
+
+  context.save();
+  context.translate(anchorX, anchorY);
+  context.fillStyle = "rgba(24, 36, 45, 0.82)";
+  context.strokeStyle = "rgba(242, 233, 214, 0.65)";
+  context.lineWidth = 2;
+  context.beginPath();
+  context.roundRect(0, 0, panelWidth, panelHeight, 12);
+  context.fill();
+  context.stroke();
+
+  context.fillStyle = "#f5f0df";
+  context.font = "bold 13px Trebuchet MS";
+  context.fillText(`Angle ${Math.round(aim.angle)}°`, 12, 18);
+  context.font = "12px Trebuchet MS";
+  context.fillText(`Power ${Math.round(aim.chargeValue * 100)}%`, 12, 34);
+
+  context.fillStyle = "rgba(255,255,255,0.16)";
+  context.beginPath();
+  context.roundRect(12, 40, 126, 8, 999);
+  context.fill();
+
+  context.fillStyle = aim.charging ? "#f08a24" : "#d9b65e";
+  context.beginPath();
+  context.roundRect(12, 40, Math.max(10, 126 * aim.chargeValue), 8, 999);
+  context.fill();
+
+  context.strokeStyle = "#c44b35";
+  context.lineWidth = 3;
+  const cursorX = 12 + 126 * aim.chargeValue;
+  context.beginPath();
+  context.moveTo(cursorX, 38);
+  context.lineTo(cursorX, 50);
+  context.stroke();
   context.restore();
 }

@@ -1,4 +1,4 @@
-import type { MapDefinition } from "../types";
+import type { MapDefinition } from "../types.js";
 
 export const mapDefinitions: MapDefinition[] = [
   {

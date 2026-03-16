@@ -46,10 +46,11 @@ export interface WeaponDefinition {
   name: string;
   kind: WeaponKind;
   maxCharge: number;
-  maxRange: number;
+  rangeRatio: number;
   baseDamage: number;
   blastRadius: number;
   windFactor: number;
+  speedFactor: number;
   pellets?: number;
   pelletDamageFactor?: number;
 }

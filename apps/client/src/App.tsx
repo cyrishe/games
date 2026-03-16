@@ -76,6 +76,7 @@ type PlatformDamageMark = {
 
 type PlatformState = PlatformDefinition & {
   destroyed: boolean;
+  damageScore: number;
   damageMarks: PlatformDamageMark[];
 };
 
@@ -94,12 +95,17 @@ const chargeSpeed = 0.009;
 const tankWidth = 54;
 const tankHeight = 28;
 const projectileRadius = 7;
-const projectileScale = 1.5;
+const projectileScale = 1.18;
 const windAcceleration = prototypeGameConfig.wind.defaultForce * 0.045;
 const enemyInitialHealth = 100;
 const hitFeedbackDurationsMs = 1600;
 const explosionDurationMs = 420;
-const maxDamageMarksPerPlatform = 6;
+const maxDamageMarksPerPlatform = 40;
+const collapseDamageScore = 100;
+
+function getWeaponMaxRange() {
+  return previewMap.worldWidth * activeWeapon.rangeRatio;
+}
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -153,6 +159,7 @@ function createInitialPlatformsState(): PlatformState[] {
   return previewMap.platforms.map((platform) => ({
     ...platform,
     destroyed: false,
+    damageScore: platform.integrityLevel * 20,
     damageMarks: []
   }));
 }
@@ -752,7 +759,7 @@ function stepAim(current: AimState, pressedKeys: Set<string>, deltaSeconds: numb
 
 function createProjectile(player: TankState, aim: AimState): ProjectileState {
   const angleRadians = getTurretAngleRadians(aim.angle, player.facing);
-  const speed = (activeWeapon.maxRange / 72) * Math.max(0.12, aim.chargeValue);
+  const speed = (getWeaponMaxRange() / 112) * activeWeapon.speedFactor * Math.max(0.12, aim.chargeValue);
 
   return {
     x: player.x + tankWidth / 2 + Math.cos(angleRadians) * 28,
@@ -802,18 +809,35 @@ function stepProjectile(
       continue;
     }
 
-    if (
-      nextX + projectileRadius >= platform.x &&
-      nextX - projectileRadius <= platform.x + platform.width &&
-      nextY + projectileRadius >= platform.y &&
-      nextY - projectileRadius <= platform.y + platform.height
-    ) {
-      return resolveImpact(nextProjectile, enemy, true, platforms);
+    const contactPoint = findSegmentPlatformContact(current.x, current.y, nextX, nextY, platform);
+
+    if (contactPoint) {
+      return resolveImpact(
+        {
+          ...nextProjectile,
+          x: contactPoint.x,
+          y: contactPoint.y
+        },
+        enemy,
+        true,
+        platforms
+      );
     }
   }
 
-  if (nextY + projectileRadius >= previewMap.finalFloorY) {
-    return resolveImpact(nextProjectile, enemy, true, platforms);
+  const floorContact = findSegmentHorizontalContact(current.x, current.y, nextX, nextY, previewMap.finalFloorY);
+
+  if (floorContact) {
+    return resolveImpact(
+      {
+        ...nextProjectile,
+        x: floorContact.x,
+        y: floorContact.y
+      },
+      enemy,
+      true,
+      platforms
+    );
   }
 
   if (nextX < 0 || nextX > previewMap.worldWidth || nextY < 0 || nextY > previewMap.worldHeight) {
@@ -885,23 +909,20 @@ function applyTerrainDamage(
       return platform;
     }
 
-    const nextIntegrity = clamp(
-      platform.integrityLevel + (distance < blastRadius * 0.45 ? 2 : 1),
-      0,
-      prototypeGameConfig.destruction.criticalThreshold
+    const damageGain = distance < blastRadius * 0.28 ? 12 : distance < blastRadius * 0.58 ? 7 : 4;
+    const nextDamageScore = clamp(platform.damageScore + damageGain, 0, collapseDamageScore);
+    const nextIntegrity = Math.min(
+      prototypeGameConfig.destruction.criticalThreshold,
+      Math.floor(nextDamageScore / 20)
     ) as PlatformState["integrityLevel"];
     const relativeX = clamp(impactX - platform.x, 10, platform.width - 10);
     const relativeY = clamp(impactY - platform.y, 4, platform.height - 4);
-    const nextDamageMarks = [
-      ...platform.damageMarks,
-      {
-        x: relativeX,
-        y: relativeY,
-        radius: clamp(blastRadius * 0.5, 14, Math.max(platform.height * 1.1, 18))
-      }
-    ].slice(-maxDamageMarksPerPlatform);
+    const nextDamageMarks = mergeDamageMarks(
+      platform.damageMarks,
+      createDamageMarks(relativeX, relativeY, blastRadius, platform.width, platform.height)
+    ).slice(-maxDamageMarksPerPlatform);
     const nextDestroyed =
-      platform.id === "bottom-floor" ? false : nextIntegrity >= prototypeGameConfig.destruction.criticalThreshold;
+      platform.id === "bottom-floor" ? false : nextDamageScore >= collapseDamageScore;
 
     damaged.push(platform.id);
 
@@ -911,6 +932,7 @@ function applyTerrainDamage(
 
     return {
       ...platform,
+      damageScore: nextDamageScore,
       integrityLevel: nextIntegrity,
       destroyed: nextDestroyed,
       damageMarks: nextDestroyed ? [] : nextDamageMarks
@@ -921,6 +943,99 @@ function applyTerrainDamage(
     platforms: nextPlatforms,
     summary: { damaged, destroyed }
   };
+}
+
+function mergeDamageMarks(existing: PlatformDamageMark[], incoming: PlatformDamageMark[]) {
+  const merged = [...existing];
+
+  for (const mark of incoming) {
+    const nearby = merged.find(
+      (candidate) =>
+        Math.hypot(candidate.x - mark.x, candidate.y - mark.y) <= Math.max(candidate.radius, mark.radius) * 0.7
+    );
+
+    if (nearby) {
+      nearby.x = (nearby.x + mark.x) / 2;
+      nearby.y = (nearby.y + mark.y) / 2;
+      nearby.radius = clamp(nearby.radius + mark.radius * 0.18, nearby.radius, nearby.radius + 1.2);
+    } else {
+      merged.push(mark);
+    }
+  }
+
+  return merged;
+}
+
+function createDamageMarks(
+  centerX: number,
+  centerY: number,
+  blastRadius: number,
+  platformWidth: number,
+  platformHeight: number
+): PlatformDamageMark[] {
+  const baseRadius = clamp(Math.min(blastRadius * 0.2, platformHeight * 0.38), 4, 10);
+  const offsets = [
+    { x: 0, y: 0, scale: 1 },
+    { x: -baseRadius * 0.85, y: -baseRadius * 0.08, scale: 0.58 },
+    { x: baseRadius * 0.7, y: baseRadius * 0.14, scale: 0.48 },
+    { x: 0, y: -baseRadius * 0.5, scale: 0.34 }
+  ];
+
+  return offsets.map((offset) => ({
+    x: clamp(centerX + offset.x, 4, platformWidth - 4),
+    y: clamp(centerY + offset.y, 3, platformHeight - 3),
+    radius: clamp(baseRadius * offset.scale, 2.2, Math.max(2.8, platformHeight * 0.3))
+  }));
+}
+
+function findSegmentPlatformContact(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  platform: PlatformState
+) {
+  const steps = Math.max(8, Math.ceil(Math.hypot(endX - startX, endY - startY) / 2));
+
+  for (let step = 1; step <= steps; step += 1) {
+    const t = step / steps;
+    const x = startX + (endX - startX) * t;
+    const y = startY + (endY - startY) * t;
+
+    if (
+      x + projectileRadius >= platform.x &&
+      x - projectileRadius <= platform.x + platform.width &&
+      y + projectileRadius >= platform.y &&
+      y - projectileRadius <= platform.y + platform.height
+    ) {
+      return {
+        x,
+        y
+      };
+    }
+  }
+
+  return null;
+}
+
+function findSegmentHorizontalContact(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number,
+  horizontalY: number
+) {
+  if (startY <= horizontalY && endY >= horizontalY) {
+    const denominator = endY - startY;
+    const t = denominator === 0 ? 0 : (horizontalY - startY) / denominator;
+
+    return {
+      x: startX + (endX - startX) * t,
+      y: horizontalY
+    };
+  }
+
+  return null;
 }
 
 function resolveHitQuality(
@@ -1085,7 +1200,7 @@ function drawTrajectoryPreview(context: CanvasRenderingContext2D, player: TankSt
   const originX = player.x + tankWidth / 2;
   const originY = player.y + 8;
   const angleRadians = getTurretAngleRadians(aim.angle, player.facing);
-  const speed = (activeWeapon.maxRange / 72) * Math.max(0.12, aim.chargeValue);
+  const speed = (getWeaponMaxRange() / 112) * activeWeapon.speedFactor * Math.max(0.12, aim.chargeValue);
   const vx = Math.cos(angleRadians) * speed;
   const vy = -Math.sin(angleRadians) * speed;
 
@@ -1147,6 +1262,13 @@ function drawExplosion(context: CanvasRenderingContext2D, explosion: ExplosionSt
   context.restore();
 }
 
+function createWorldGradient(context: CanvasRenderingContext2D) {
+  const gradient = context.createLinearGradient(0, 0, 0, previewMap.worldHeight);
+  gradient.addColorStop(0, previewMap.background.skyTop);
+  gradient.addColorStop(1, previewMap.background.skyBottom);
+  return gradient;
+}
+
 function isProjectileInsideTank(x: number, y: number, enemy: EnemyState) {
   if (enemy.health <= 0) {
     return false;
@@ -1175,6 +1297,8 @@ function drawGrid(context: CanvasRenderingContext2D) {
 }
 
 function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformState[]) {
+  const worldGradient = createWorldGradient(context);
+
   for (const platform of platforms) {
     if (platform.destroyed) {
       continue;
@@ -1204,7 +1328,7 @@ function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformSta
       context.beginPath();
       context.roundRect(platform.x, platform.y, platform.width, platform.height, 12);
       context.clip();
-      context.globalCompositeOperation = "destination-out";
+      context.fillStyle = worldGradient;
 
       for (const mark of platform.damageMarks) {
         context.beginPath();
@@ -1215,8 +1339,8 @@ function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformSta
       context.restore();
 
       context.save();
-      context.strokeStyle = "rgba(77, 57, 37, 0.45)";
-      context.lineWidth = 2;
+      context.strokeStyle = "rgba(77, 57, 37, 0.28)";
+      context.lineWidth = 1.25;
 
       for (const mark of platform.damageMarks) {
         context.beginPath();

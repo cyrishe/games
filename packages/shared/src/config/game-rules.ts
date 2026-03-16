@@ -1,4 +1,4 @@
-import type { PrototypeGameConfig } from "../types";
+import type { PrototypeGameConfig } from "../types.js";
 
 export const prototypeGameConfig: PrototypeGameConfig = {
   turn: {

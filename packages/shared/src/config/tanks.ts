@@ -1,4 +1,4 @@
-import type { TankDefinition } from "../types";
+import type { TankDefinition } from "../types.js";
 
 export const tankDefinitions: TankDefinition[] = [
   {
@@ -7,8 +7,8 @@ export const tankDefinitions: TankDefinition[] = [
     maxHealth: 100,
     moveSpeed: 2.8,
     jumpVelocity: 8.2,
-    turretAngleMin: 20,
-    turretAngleMax: 160,
+    turretAngleMin: 10,
+    turretAngleMax: 90,
     baseWeaponId: "standard-shell",
     weightClass: "medium"
   }

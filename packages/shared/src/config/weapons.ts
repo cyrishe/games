@@ -8,7 +8,7 @@ export const weaponDefinitions: WeaponDefinition[] = [
     maxCharge: 100,
     rangeRatio: 0.96,
     baseDamage: 34,
-    blastRadius: 34,
+    blastRadius: 42,
     windFactor: 1,
     speedFactor: 0.7
   },
@@ -19,7 +19,7 @@ export const weaponDefinitions: WeaponDefinition[] = [
     maxCharge: 100,
     rangeRatio: 0.75,
     baseDamage: 42,
-    blastRadius: 26,
+    blastRadius: 32,
     windFactor: 0.7,
     speedFactor: 0.62,
     pellets: 5,

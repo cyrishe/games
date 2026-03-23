@@ -46,6 +46,7 @@
 ```text
 apps/
   client/   React + Vite 客户端原型
+  cocos-client/ Cocos Creator 客户端迁移落点
   server/   Node.js + WebSocket 服务端骨架
 packages/
   shared/   地图、数值、规则、类型定义
@@ -99,3 +100,4 @@ npm run dev:server
 - [设计草案](docs/game-design.md)
 - [界面示意图](docs/ui-mockup.svg)
 - [架构草案](docs/architecture.md)
+- [Cocos 迁移方案](docs/cocos-migration-plan.md)

@@ -68,16 +68,12 @@ type EnemyState = {
   facing: 1 | -1;
 };
 
-type PlatformDamageMark = {
-  x: number;
-  y: number;
-  radius: number;
-};
-
 type PlatformState = PlatformDefinition & {
   destroyed: boolean;
-  damageScore: number;
-  damageMarks: PlatformDamageMark[];
+  cellSize: number;
+  cols: number;
+  rows: number;
+  solidCells: boolean[];
 };
 
 const previewMap = mapDefinitions[0];
@@ -92,16 +88,16 @@ const terminalVelocity = 14;
 const movementScale = 2.35;
 const aimAdjustStep = 0.72;
 const chargeSpeed = 0.009;
-const tankWidth = 54;
-const tankHeight = 28;
-const projectileRadius = 7;
-const projectileScale = 1.18;
+const tankWidth = 92;
+const tankHeight = 52;
+const projectileRadius = 10;
+const projectileCollisionRadius = 1.2;
+const projectileScale = 1.34;
 const windAcceleration = prototypeGameConfig.wind.defaultForce * 0.045;
 const enemyInitialHealth = 100;
 const hitFeedbackDurationsMs = 1600;
 const explosionDurationMs = 420;
-const maxDamageMarksPerPlatform = 40;
-const collapseDamageScore = 100;
+const terrainCellSize = 1;
 
 function getWeaponMaxRange() {
   return previewMap.worldWidth * activeWeapon.rangeRatio;
@@ -130,7 +126,7 @@ function createInitialAimState(): AimState {
     angle: 42,
     charging: false,
     chargeDirection: 1,
-    chargeValue: 0.18
+    chargeValue: 0
   };
 }
 
@@ -159,8 +155,12 @@ function createInitialPlatformsState(): PlatformState[] {
   return previewMap.platforms.map((platform) => ({
     ...platform,
     destroyed: false,
-    damageScore: platform.integrityLevel * 20,
-    damageMarks: []
+    cellSize: terrainCellSize,
+    cols: Math.max(1, Math.ceil(platform.width / terrainCellSize)),
+    rows: Math.max(1, Math.ceil(platform.height / terrainCellSize)),
+    solidCells: Array.from({
+      length: Math.max(1, Math.ceil(platform.width / terrainCellSize)) * Math.max(1, Math.ceil(platform.height / terrainCellSize))
+    }, () => true)
   }));
 }
 
@@ -300,8 +300,16 @@ export function App() {
         enemyRef.current.health > 0
       ) {
         const nextProjectile = createProjectile(nextPlayer, nextAim);
+        const resetAim = {
+          ...nextAim,
+          charging: false,
+          chargeDirection: 1 as const,
+          chargeValue: 0
+        };
         projectileRef.current = nextProjectile;
+        aimRef.current = resetAim;
         setProjectile(nextProjectile);
+        setAim(resetAim);
         setStatusText(`已发射 ${activeWeapon.name}，观察落点并判断是否命中。`);
       }
 
@@ -587,7 +595,7 @@ export function App() {
                 <InfoRow label="地形状态" value={`${platforms.filter((platform) => !platform.destroyed).length} 段可用`} />
                 <InfoRow label="回合" value={`${prototypeGameConfig.turn.turnDurationMs / 1000}s`} />
                 <div className="charge-track">
-                  <div className="charge-fill" style={{ width: `${Math.max(8, aim.chargeValue * 100)}%` }} />
+                  <div className="charge-fill" style={{ width: `${aim.chargeValue * 100}%` }} />
                   <div className="charge-cursor" style={{ left: `${aim.chargeValue * 100}%` }} />
                 </div>
               </Panel>
@@ -700,7 +708,12 @@ function stepTank(
     }
 
     const overlapX = nextX + tankWidth > platform.x && nextX < platform.x + platform.width;
-    const fallsOntoPlatform = next.velocityY >= 0 && overlapX && previousBottom <= platform.y && nextBottom >= platform.y;
+    const fallsOntoPlatform =
+      next.velocityY >= 0 &&
+      overlapX &&
+      previousBottom <= platform.y &&
+      nextBottom >= platform.y &&
+      hasSolidSupport(platform, nextX + 6, nextX + tankWidth - 6);
 
     if (fallsOntoPlatform) {
       nextY = platform.y - tankHeight;
@@ -746,8 +759,8 @@ function stepAim(current: AimState, pressedKeys: Set<string>, deltaSeconds: numb
     if (next.chargeValue >= 1) {
       next.chargeValue = 1;
       next.chargeDirection = -1;
-    } else if (next.chargeValue <= 0.08) {
-      next.chargeValue = 0.08;
+    } else if (next.chargeValue <= 0) {
+      next.chargeValue = 0;
       next.chargeDirection = 1;
     }
   } else if (next.charging) {
@@ -763,7 +776,7 @@ function createProjectile(player: TankState, aim: AimState): ProjectileState {
 
   return {
     x: player.x + tankWidth / 2 + Math.cos(angleRadians) * 28,
-    y: player.y + 8 - Math.sin(angleRadians) * 12,
+    y: player.y + 14 - Math.sin(angleRadians) * 15,
     velocityX: Math.cos(angleRadians) * speed,
     velocityY: -Math.sin(angleRadians) * speed,
     active: true
@@ -909,20 +922,16 @@ function applyTerrainDamage(
       return platform;
     }
 
-    const damageGain = distance < blastRadius * 0.28 ? 12 : distance < blastRadius * 0.58 ? 7 : 4;
-    const nextDamageScore = clamp(platform.damageScore + damageGain, 0, collapseDamageScore);
-    const nextIntegrity = Math.min(
-      prototypeGameConfig.destruction.criticalThreshold,
-      Math.floor(nextDamageScore / 20)
-    ) as PlatformState["integrityLevel"];
+    const isBaseFloor = platform.id === "bottom-floor";
     const relativeX = clamp(impactX - platform.x, 10, platform.width - 10);
     const relativeY = clamp(impactY - platform.y, 4, platform.height - 4);
-    const nextDamageMarks = mergeDamageMarks(
-      platform.damageMarks,
-      createDamageMarks(relativeX, relativeY, blastRadius, platform.width, platform.height)
-    ).slice(-maxDamageMarksPerPlatform);
-    const nextDestroyed =
-      platform.id === "bottom-floor" ? false : nextDamageScore >= collapseDamageScore;
+    const carveResult = carvePlatformCells(platform, relativeX, relativeY, blastRadius);
+    const removedRatio = 1 - carveResult.remainingRatio;
+    const nextIntegrity = Math.min(
+      isBaseFloor ? 1 : prototypeGameConfig.destruction.criticalThreshold,
+      Math.floor(removedRatio * 6)
+    ) as PlatformState["integrityLevel"];
+    const nextDestroyed = isBaseFloor ? false : carveResult.remainingRatio <= 0.08;
 
     damaged.push(platform.id);
 
@@ -932,10 +941,9 @@ function applyTerrainDamage(
 
     return {
       ...platform,
-      damageScore: nextDamageScore,
       integrityLevel: nextIntegrity,
       destroyed: nextDestroyed,
-      damageMarks: nextDestroyed ? [] : nextDamageMarks
+      solidCells: nextDestroyed ? platform.solidCells.map(() => false) : carveResult.solidCells
     };
   });
 
@@ -945,47 +953,105 @@ function applyTerrainDamage(
   };
 }
 
-function mergeDamageMarks(existing: PlatformDamageMark[], incoming: PlatformDamageMark[]) {
-  const merged = [...existing];
+function carvePlatformCells(
+  platform: PlatformState,
+  centerX: number,
+  centerY: number,
+  blastRadius: number
+) {
+  const solidCells = [...platform.solidCells];
+  const centerCol = clamp(Math.floor(centerX / platform.cellSize), 0, platform.cols - 1);
+  const estimatedRow = clamp(Math.floor(centerY / platform.cellSize), 0, platform.rows - 1);
+  const centerRow = findSurfaceRow(platform, solidCells, centerCol, estimatedRow);
+  const craterRadiusCells = Math.max(5, Math.floor(Math.min(blastRadius * 0.2, platform.width * 0.12) / platform.cellSize));
+  const craterDepthCells = Math.max(4, Math.floor(Math.min(blastRadius * 0.24, platform.height * 0.95) / platform.cellSize));
+  const protectedRows = platform.id === "bottom-floor" ? 4 : 0;
 
-  for (const mark of incoming) {
-    const nearby = merged.find(
-      (candidate) =>
-        Math.hypot(candidate.x - mark.x, candidate.y - mark.y) <= Math.max(candidate.radius, mark.radius) * 0.7
-    );
+  for (let row = centerRow; row <= centerRow + craterDepthCells; row += 1) {
+    for (let col = centerCol - craterRadiusCells; col <= centerCol + craterRadiusCells; col += 1) {
+      if (row < 0 || row >= platform.rows || col < 0 || col >= platform.cols) {
+        continue;
+      }
 
-    if (nearby) {
-      nearby.x = (nearby.x + mark.x) / 2;
-      nearby.y = (nearby.y + mark.y) / 2;
-      nearby.radius = clamp(nearby.radius + mark.radius * 0.18, nearby.radius, nearby.radius + 1.2);
-    } else {
-      merged.push(mark);
+      if (row >= platform.rows - protectedRows) {
+        continue;
+      }
+
+      const index = row * platform.cols + col;
+      if (!solidCells[index]) {
+        continue;
+      }
+
+      const dx = (col - centerCol) / craterRadiusCells;
+      const dy = (row - centerRow) / craterDepthCells;
+      const hemisphere = dx * dx + dy * dy;
+      const threshold = ((col * 19 + row * 23) % 13) / 12;
+      const chance = clamp(1.06 - hemisphere * 0.95, 0.08, 1);
+
+      if (hemisphere <= 1 && threshold <= chance) {
+        solidCells[index] = false;
+      }
     }
   }
 
-  return merged;
+  settleUnsupportedCells(platform, solidCells);
+
+  const remainingCount = solidCells.filter(Boolean).length;
+
+  return {
+    solidCells,
+    remainingRatio: remainingCount / solidCells.length
+  };
 }
 
-function createDamageMarks(
-  centerX: number,
-  centerY: number,
-  blastRadius: number,
-  platformWidth: number,
-  platformHeight: number
-): PlatformDamageMark[] {
-  const baseRadius = clamp(Math.min(blastRadius * 0.2, platformHeight * 0.38), 4, 10);
-  const offsets = [
-    { x: 0, y: 0, scale: 1 },
-    { x: -baseRadius * 0.85, y: -baseRadius * 0.08, scale: 0.58 },
-    { x: baseRadius * 0.7, y: baseRadius * 0.14, scale: 0.48 },
-    { x: 0, y: -baseRadius * 0.5, scale: 0.34 }
-  ];
+function findSurfaceRow(platform: PlatformState, solidCells: boolean[], centerCol: number, estimatedRow: number) {
+  for (let row = estimatedRow; row < platform.rows; row += 1) {
+    const index = row * platform.cols + centerCol;
+    if (solidCells[index]) {
+      return row;
+    }
+  }
 
-  return offsets.map((offset) => ({
-    x: clamp(centerX + offset.x, 4, platformWidth - 4),
-    y: clamp(centerY + offset.y, 3, platformHeight - 3),
-    radius: clamp(baseRadius * offset.scale, 2.2, Math.max(2.8, platformHeight * 0.3))
-  }));
+  for (let row = estimatedRow; row >= 0; row -= 1) {
+    const index = row * platform.cols + centerCol;
+    if (solidCells[index]) {
+      return row;
+    }
+  }
+
+  return estimatedRow;
+}
+
+function settleUnsupportedCells(platform: PlatformState, solidCells: boolean[]) {
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (let row = platform.rows - 2; row >= 0; row -= 1) {
+      for (let col = 0; col < platform.cols; col += 1) {
+        const index = row * platform.cols + col;
+
+        if (!solidCells[index]) {
+          continue;
+        }
+
+        const below = (row + 1) * platform.cols + col;
+        const belowLeft = col > 0 ? (row + 1) * platform.cols + (col - 1) : -1;
+        const belowRight = col < platform.cols - 1 ? (row + 1) * platform.cols + (col + 1) : -1;
+
+        const supported =
+          solidCells[below] ||
+          (belowLeft >= 0 && solidCells[belowLeft]) ||
+          (belowRight >= 0 && solidCells[belowRight]);
+
+        if (!supported) {
+          solidCells[index] = false;
+          changed = true;
+        }
+      }
+    }
+  }
 }
 
 function findSegmentPlatformContact(
@@ -996,26 +1062,67 @@ function findSegmentPlatformContact(
   platform: PlatformState
 ) {
   const steps = Math.max(8, Math.ceil(Math.hypot(endX - startX, endY - startY) / 2));
+  let previousPoint = { x: startX, y: startY };
 
   for (let step = 1; step <= steps; step += 1) {
     const t = step / steps;
     const x = startX + (endX - startX) * t;
     const y = startY + (endY - startY) * t;
 
-    if (
-      x + projectileRadius >= platform.x &&
-      x - projectileRadius <= platform.x + platform.width &&
-      y + projectileRadius >= platform.y &&
-      y - projectileRadius <= platform.y + platform.height
-    ) {
+    if (isPointInsideSolidPlatform(x, y, platform, projectileCollisionRadius)) {
       return {
-        x,
-        y
+        x: previousPoint.x,
+        y: previousPoint.y
       };
     }
+
+    previousPoint = { x, y };
   }
 
   return null;
+}
+
+function isPointInsideSolidPlatform(x: number, y: number, platform: PlatformState, radius = 0) {
+  if (
+    x + radius < platform.x ||
+    x - radius > platform.x + platform.width ||
+    y + radius < platform.y ||
+    y - radius > platform.y + platform.height
+  ) {
+    return false;
+  }
+
+  const localX = x - platform.x;
+  const localY = y - platform.y;
+  const minCol = clamp(Math.floor((localX - radius) / platform.cellSize), 0, platform.cols - 1);
+  const maxCol = clamp(Math.floor((localX + radius) / platform.cellSize), 0, platform.cols - 1);
+  const minRow = clamp(Math.floor((localY - radius) / platform.cellSize), 0, platform.rows - 1);
+  const maxRow = clamp(Math.floor((localY + radius) / platform.cellSize), 0, platform.rows - 1);
+
+  for (let row = minRow; row <= maxRow; row += 1) {
+    for (let col = minCol; col <= maxCol; col += 1) {
+      if (platform.solidCells[row * platform.cols + col]) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function hasSolidSupport(platform: PlatformState, worldStartX: number, worldEndX: number) {
+  const localStartX = clamp(worldStartX - platform.x, 0, platform.width - 1);
+  const localEndX = clamp(worldEndX - platform.x, 0, platform.width - 1);
+  const minCol = clamp(Math.floor(localStartX / platform.cellSize), 0, platform.cols - 1);
+  const maxCol = clamp(Math.floor(localEndX / platform.cellSize), 0, platform.cols - 1);
+
+  for (let col = minCol; col <= maxCol; col += 1) {
+    if (platform.solidCells[col]) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 function findSegmentHorizontalContact(
@@ -1198,7 +1305,7 @@ function drawBattlefield(
 
 function drawTrajectoryPreview(context: CanvasRenderingContext2D, player: TankState, aim: AimState) {
   const originX = player.x + tankWidth / 2;
-  const originY = player.y + 8;
+  const originY = player.y + 14;
   const angleRadians = getTurretAngleRadians(aim.angle, player.facing);
   const speed = (getWeaponMaxRange() / 112) * activeWeapon.speedFactor * Math.max(0.12, aim.chargeValue);
   const vx = Math.cos(angleRadians) * speed;
@@ -1262,13 +1369,6 @@ function drawExplosion(context: CanvasRenderingContext2D, explosion: ExplosionSt
   context.restore();
 }
 
-function createWorldGradient(context: CanvasRenderingContext2D) {
-  const gradient = context.createLinearGradient(0, 0, 0, previewMap.worldHeight);
-  gradient.addColorStop(0, previewMap.background.skyTop);
-  gradient.addColorStop(1, previewMap.background.skyBottom);
-  return gradient;
-}
-
 function isProjectileInsideTank(x: number, y: number, enemy: EnemyState) {
   if (enemy.health <= 0) {
     return false;
@@ -1297,8 +1397,6 @@ function drawGrid(context: CanvasRenderingContext2D) {
 }
 
 function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformState[]) {
-  const worldGradient = createWorldGradient(context);
-
   for (const platform of platforms) {
     if (platform.destroyed) {
       continue;
@@ -1318,37 +1416,23 @@ function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformSta
     const gradient = context.createLinearGradient(0, platform.y, 0, platform.y + platform.height);
     gradient.addColorStop(0, top);
     gradient.addColorStop(1, bottom);
-    context.fillStyle = gradient;
-    context.beginPath();
-    context.roundRect(platform.x, platform.y, platform.width, platform.height, 12);
-    context.fill();
+    for (let row = 0; row < platform.rows; row += 1) {
+      for (let col = 0; col < platform.cols; col += 1) {
+        if (!platform.solidCells[row * platform.cols + col]) {
+          continue;
+        }
 
-    if (platform.damageMarks.length > 0) {
-      context.save();
-      context.beginPath();
-      context.roundRect(platform.x, platform.y, platform.width, platform.height, 12);
-      context.clip();
-      context.fillStyle = worldGradient;
-
-      for (const mark of platform.damageMarks) {
-        context.beginPath();
-        context.arc(platform.x + mark.x, platform.y + mark.y, mark.radius, 0, Math.PI * 2);
-        context.fill();
+        const cellX = platform.x + col * platform.cellSize;
+        const cellY = platform.y + row * platform.cellSize;
+        const localT = platform.rows <= 1 ? 0 : row / (platform.rows - 1);
+        context.fillStyle = interpolateColor(top, bottom, localT);
+        context.fillRect(
+          cellX,
+          cellY,
+          Math.min(platform.cellSize, platform.x + platform.width - cellX),
+          Math.min(platform.cellSize, platform.y + platform.height - cellY)
+        );
       }
-
-      context.restore();
-
-      context.save();
-      context.strokeStyle = "rgba(77, 57, 37, 0.28)";
-      context.lineWidth = 1.25;
-
-      for (const mark of platform.damageMarks) {
-        context.beginPath();
-        context.arc(platform.x + mark.x, platform.y + mark.y, mark.radius, 0.2, Math.PI * 1.6);
-        context.stroke();
-      }
-
-      context.restore();
     }
 
     if (platform.integrityLevel >= prototypeGameConfig.destruction.collapseThreshold) {
@@ -1360,6 +1444,25 @@ function drawPlatforms(context: CanvasRenderingContext2D, platforms: PlatformSta
 
     context.restore();
   }
+}
+
+function interpolateColor(start: string, end: string, t: number) {
+  const from = hexToRgb(start);
+  const to = hexToRgb(end);
+  const r = Math.round(from.r + (to.r - from.r) * t);
+  const g = Math.round(from.g + (to.g - from.g) * t);
+  const b = Math.round(from.b + (to.b - from.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function hexToRgb(hex: string) {
+  const normalized = hex.replace("#", "");
+  const value = Number.parseInt(normalized, 16);
+  return {
+    r: (value >> 16) & 255,
+    g: (value >> 8) & 255,
+    b: value & 255
+  };
 }
 
 function drawSpawnHints(context: CanvasRenderingContext2D) {
@@ -1387,36 +1490,61 @@ function drawTank(
 
   context.fillStyle = "rgba(0, 0, 0, 0.16)";
   context.beginPath();
-  context.ellipse(tankWidth / 2, tankHeight + 8, tankWidth / 2.1, 7, 0, 0, Math.PI * 2);
+  context.ellipse(tankWidth / 2, tankHeight + 3, tankWidth / 2.1, 7, 0, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "#243744";
+  context.beginPath();
+  context.roundRect(8, 32, tankWidth - 16, 14, 8);
   context.fill();
 
   context.fillStyle = bodyColor;
   context.beginPath();
-  context.roundRect(0, 10, tankWidth, 18, 8);
+  context.roundRect(6, 18, tankWidth - 12, 22, 12);
   context.fill();
 
   context.fillStyle = "#2a4360";
   context.beginPath();
-  context.roundRect(12, 0, 30, 14, 7);
+  context.roundRect(20, 10, tankWidth - 40, 18, 9);
+  context.fill();
+
+  context.fillStyle = "#f5f0df";
+  context.beginPath();
+  context.arc(tankWidth / 2 - 11, 18, 4, 0, Math.PI * 2);
+  context.arc(tankWidth / 2 + 11, 18, 4, 0, Math.PI * 2);
+  context.fill();
+
+  context.fillStyle = "#20303d";
+  context.beginPath();
+  context.arc(tankWidth / 2 - 11, 18, 1.8, 0, Math.PI * 2);
+  context.arc(tankWidth / 2 + 11, 18, 1.8, 0, Math.PI * 2);
   context.fill();
 
   context.strokeStyle = "#213449";
-  context.lineWidth = 5;
+  context.lineWidth = 6;
   context.beginPath();
-  context.moveTo(28, 8);
+  context.moveTo(tankWidth / 2, 18);
   if (relativeAngle !== undefined) {
     const turretAngle = getTurretAngleRadians(relativeAngle, facing);
-    context.lineTo(28 + Math.cos(turretAngle) * 24, 8 - Math.sin(turretAngle) * 24);
+    context.lineTo(tankWidth / 2 + Math.cos(turretAngle) * 36, 18 - Math.sin(turretAngle) * 36);
   } else {
-    context.lineTo(28 + facing * 24, 2);
+    context.lineTo(tankWidth / 2 + facing * 36, 12);
   }
   context.stroke();
 
-  context.fillStyle = "#213449";
+  context.fillStyle = "#18262f";
+  for (let i = 0; i < 4; i += 1) {
+    context.beginPath();
+    context.arc(18 + i * 13, 44, 6.8, 0, Math.PI * 2);
+    context.fill();
+  }
+
+  context.strokeStyle = "rgba(255,255,255,0.22)";
+  context.lineWidth = 2;
   context.beginPath();
-  context.arc(15, 28, 7, 0, Math.PI * 2);
-  context.arc(39, 28, 7, 0, Math.PI * 2);
-  context.fill();
+  context.moveTo(tankWidth / 2 - 9, 28);
+  context.lineTo(tankWidth / 2 + 9, 28);
+  context.stroke();
 
   context.restore();
 }
@@ -1460,9 +1588,11 @@ function drawTankAimHud(
   context.fill();
 
   context.fillStyle = aim.charging ? "#f08a24" : "#d9b65e";
-  context.beginPath();
-  context.roundRect(12, 40, Math.max(10, 126 * aim.chargeValue), 8, 999);
-  context.fill();
+  if (aim.chargeValue > 0) {
+    context.beginPath();
+    context.roundRect(12, 40, 126 * aim.chargeValue, 8, 999);
+    context.fill();
+  }
 
   context.strokeStyle = "#c44b35";
   context.lineWidth = 3;
